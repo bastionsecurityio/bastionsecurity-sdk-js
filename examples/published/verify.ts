@@ -4,7 +4,7 @@ import type { VerificationRequest } from '@bastionsecurity/sdk';
 const bastion = new ServerBastion({
   siteKey: process.env.BASTION_SITE_KEY!,
   secret: process.env.BASTION_SECRET_KEY!,
-  endpoint: process.env.BASTION_ENDPOINT || 'https://api-production-761a5.up.railway.app/api/antibot',
+  endpoint: process.env.BASTION_ENDPOINT || 'https://api.bastionsecurity.io/api/antibot',
 });
 
 // Call from your authenticated checkout handler. These values must
