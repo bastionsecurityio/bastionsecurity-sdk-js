@@ -1,3 +1,16 @@
 node_modules/
 dist/
 *.tgz
+
+# Local example credentials, customer data, and installed dependencies.
+.env
+**/.env
+.venv/
+__pycache__/
+vendor/
+*.gem
+examples/browser-request.json
+examples/order.json
+examples/batch.json
+examples/delivery.json
+examples/signature.txt

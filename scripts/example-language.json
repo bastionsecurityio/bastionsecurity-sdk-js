@@ -1,0 +1,7 @@
+{
+  "label": "Node.js",
+  "command": [
+    "node",
+    "examples/cli.mjs"
+  ]
+}
