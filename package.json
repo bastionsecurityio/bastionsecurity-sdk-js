@@ -1,24 +1,32 @@
 {
   "name": "@bastionsecurity/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Bastion Security client-side SDK for bot detection and device fingerprinting",
   "main": "dist/bastion.js",
-  "module": "dist/bastion.esm.js",
-  "types": "dist/types.d.ts",
+  "module": "dist/bastion.esm.mjs",
+  "types": "dist/index.d.ts",
   "files": [
     "dist"
   ],
   "scripts": {
     "build": "rollup -c",
     "dev": "rollup -c -w",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepare": "npm run build",
+    "test": "npm run build && node --test test/*.test.cjs"
   },
   "devDependencies": {
     "@rollup/plugin-typescript": "^11.1.6",
     "rollup": "^4.22.0",
-    "@rollup/plugin-terser": "^0.4.4",
     "tslib": "^2.7.0",
     "typescript": "^5.6.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/bastion.esm.mjs",
+      "require": "./dist/bastion.js"
+    }
+  }
 }

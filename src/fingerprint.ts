@@ -10,39 +10,39 @@ import type {
   TimingSignals,
   AutomationSignals,
   DeviceFingerprint,
-} from './types';
+} from "./types";
 
 async function sha256(data: string): Promise<string> {
   const encoder = new TextEncoder();
-  const buffer = await crypto.subtle.digest('SHA-256', encoder.encode(data));
+  const buffer = await crypto.subtle.digest("SHA-256", encoder.encode(data));
   return Array.from(new Uint8Array(buffer))
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function collectCanvas(): CanvasSignals {
-  const canvas = document.createElement('canvas');
+  const canvas = document.createElement("canvas");
   canvas.width = 280;
   canvas.height = 60;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return { hash: '', emojiHash: '' };
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return { hash: "", emojiHash: "" };
 
-  ctx.fillStyle = '#f60';
+  ctx.fillStyle = "#f60";
   ctx.fillRect(125, 1, 62, 20);
 
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = '#069';
-  ctx.font = '11pt Arial';
-  ctx.fillText('Cwm fjordbank glyph vext quiz, 😀', 2, 15);
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "#069";
+  ctx.font = "11pt Arial";
+  ctx.fillText("Cwm fjordbank glyph vext quiz, 😀", 2, 15);
 
-  ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
-  ctx.font = '18pt Arial';
-  ctx.fillText('Cwm fjordbank glyph vext quiz, 😀', 4, 45);
+  ctx.fillStyle = "rgba(102, 204, 0, 0.7)";
+  ctx.font = "18pt Arial";
+  ctx.fillText("Cwm fjordbank glyph vext quiz, 😀", 4, 45);
 
   const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
-  gradient.addColorStop(0, '#ff0000');
-  gradient.addColorStop(0.5, '#00ff00');
-  gradient.addColorStop(1, '#0000ff');
+  gradient.addColorStop(0, "#ff0000");
+  gradient.addColorStop(0.5, "#00ff00");
+  gradient.addColorStop(1, "#0000ff");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 50, canvas.width, 10);
 
@@ -53,14 +53,14 @@ function collectCanvas(): CanvasSignals {
 
   const mainData = canvas.toDataURL();
 
-  const emojiCanvas = document.createElement('canvas');
+  const emojiCanvas = document.createElement("canvas");
   emojiCanvas.width = 200;
   emojiCanvas.height = 50;
-  const ectx = emojiCanvas.getContext('2d');
-  let emojiData = '';
+  const ectx = emojiCanvas.getContext("2d");
+  let emojiData = "";
   if (ectx) {
-    ectx.font = '30px serif';
-    ectx.fillText('🤔🚀🌍🌟🔥', 0, 35);
+    ectx.font = "30px serif";
+    ectx.fillText("🤔🚀🌍🌟🔥", 0, 35);
     emojiData = emojiCanvas.toDataURL();
   }
 
@@ -71,27 +71,27 @@ function collectCanvas(): CanvasSignals {
 }
 
 function collectWebGL(): WebGLSignals {
-  const canvas = document.createElement('canvas');
+  const canvas = document.createElement("canvas");
   const gl =
-    (canvas.getContext('webgl') as WebGLRenderingContext | null) ||
-    (canvas.getContext('experimental-webgl') as WebGLRenderingContext | null);
+    (canvas.getContext("webgl") as WebGLRenderingContext | null) ||
+    (canvas.getContext("experimental-webgl") as WebGLRenderingContext | null);
 
   if (!gl) {
     return {
-      vendor: '',
-      renderer: '',
+      vendor: "",
+      renderer: "",
       extensions: [],
       maxTextureSize: 0,
       maxRenderBufferSize: 0,
       maxViewportWidth: 0,
       maxViewportHeight: 0,
-      shadingLanguageVersion: '',
+      shadingLanguageVersion: "",
       antialiasing: false,
-      hash: '',
+      hash: "",
     };
   }
 
-  const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+  const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
   const vendor = debugInfo
     ? (gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) as string)
     : (gl.getParameter(gl.VENDOR) as string);
@@ -101,10 +101,14 @@ function collectWebGL(): WebGLSignals {
 
   const extensions = (gl.getSupportedExtensions() || []).sort();
   const maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
-  const maxRenderBufferSize = gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number;
+  const maxRenderBufferSize = gl.getParameter(
+    gl.MAX_RENDERBUFFER_SIZE,
+  ) as number;
   const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
-  const shadingLanguageVersion = gl.getParameter(gl.SHADING_LANGUAGE_VERSION) as string;
-  const antialiasing = !!(gl.getContextAttributes()?.antialias);
+  const shadingLanguageVersion = gl.getParameter(
+    gl.SHADING_LANGUAGE_VERSION,
+  ) as string;
+  const antialiasing = !!gl.getContextAttributes()?.antialias;
 
   const raw = JSON.stringify({
     vendor,
@@ -135,16 +139,19 @@ async function collectAudio(): Promise<AudioSignals> {
     const AudioCtx =
       (window as unknown as Record<string, unknown>).OfflineAudioContext ||
       (window as unknown as Record<string, unknown>).webkitOfflineAudioContext;
-    if (!AudioCtx) return { hash: '', sampleRate: 0, channelCount: 0, oscillatorValue: 0 };
+    if (!AudioCtx)
+      return { hash: "", sampleRate: 0, channelCount: 0, oscillatorValue: 0 };
 
-    const context = new (AudioCtx as new (
-      channels: number,
-      length: number,
-      sampleRate: number,
-    ) => OfflineAudioContext)(1, 44100, 44100);
+    const context = new (
+      AudioCtx as new (
+        channels: number,
+        length: number,
+        sampleRate: number,
+      ) => OfflineAudioContext
+    )(1, 44100, 44100);
 
     const oscillator = context.createOscillator();
-    oscillator.type = 'triangle';
+    oscillator.type = "triangle";
     oscillator.frequency.setValueAtTime(10000, context.currentTime);
 
     const compressor = context.createDynamicsCompressor();
@@ -158,7 +165,11 @@ async function collectAudio(): Promise<AudioSignals> {
     compressor.connect(context.destination);
     oscillator.start(0);
 
-    const buffer = await context.startRendering();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const buffer = await Promise.race([
+      context.startRendering(),
+      new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Audio observation unavailable")), 2000); }),
+    ]).finally(() => { clearTimeout(timer); oscillator.disconnect(); compressor.disconnect(); });
     const data = buffer.getChannelData(0);
     let sum = 0;
     for (let i = 4500; i < 5000; i++) {
@@ -172,26 +183,27 @@ async function collectAudio(): Promise<AudioSignals> {
       oscillatorValue: sum,
     };
   } catch {
-    return { hash: '', sampleRate: 0, channelCount: 0, oscillatorValue: 0 };
+    return { hash: "", sampleRate: 0, channelCount: 0, oscillatorValue: 0 };
   }
 }
 
 function collectScreen(): ScreenSignals {
   const screen = window.screen;
   let hdr = false;
-  let colorGamut = 'srgb';
+  let colorGamut = "srgb";
 
   try {
-    hdr = window.matchMedia('(dynamic-range: high)').matches;
-    if (window.matchMedia('(color-gamut: rec2020)').matches) colorGamut = 'rec2020';
-    else if (window.matchMedia('(color-gamut: p3)').matches) colorGamut = 'p3';
+    hdr = window.matchMedia("(dynamic-range: high)").matches;
+    if (window.matchMedia("(color-gamut: rec2020)").matches)
+      colorGamut = "rec2020";
+    else if (window.matchMedia("(color-gamut: p3)").matches) colorGamut = "p3";
   } catch {
     // matchMedia not available
   }
 
-  let orientation = 'unknown';
+  let orientation = "unknown";
   try {
-    orientation = screen.orientation?.type ?? 'unknown';
+    orientation = screen.orientation?.type ?? "unknown";
   } catch {
     // orientation API not available
   }
@@ -221,83 +233,84 @@ function collectBrowser(): BrowserSignals {
     maxTouchPoints: nav.maxTouchPoints || 0,
     cookieEnabled: nav.cookieEnabled,
     doNotTrack: nav.doNotTrack,
-    pdfViewerEnabled: (nav as unknown as Record<string, boolean>).pdfViewerEnabled ?? false,
+    pdfViewerEnabled:
+      (nav as unknown as Record<string, boolean>).pdfViewerEnabled ?? false,
     vendor: nav.vendor,
-    productSub: (nav as unknown as Record<string, string>).productSub ?? '',
+    productSub: (nav as unknown as Record<string, string>).productSub ?? "",
   };
 }
 
 const FONT_LIST = [
-  'Arial',
-  'Arial Black',
-  'Arial Narrow',
-  'Calibri',
-  'Cambria',
-  'Cambria Math',
-  'Comic Sans MS',
-  'Consolas',
-  'Courier',
-  'Courier New',
-  'Georgia',
-  'Helvetica',
-  'Helvetica Neue',
-  'Impact',
-  'Lucida Console',
-  'Lucida Sans Unicode',
-  'Microsoft Sans Serif',
-  'Monaco',
-  'Palatino Linotype',
-  'Segoe UI',
-  'Tahoma',
-  'Times',
-  'Times New Roman',
-  'Trebuchet MS',
-  'Verdana',
-  'Andale Mono',
-  'Book Antiqua',
-  'Bookman Old Style',
-  'Century Gothic',
-  'Century Schoolbook',
-  'Franklin Gothic Medium',
-  'Garamond',
-  'Gill Sans',
-  'Lucida Bright',
-  'Lucida Grande',
-  'MS Gothic',
-  'MS PGothic',
-  'MS Sans Serif',
-  'MS Serif',
-  'Palatino',
-  'Symbol',
-  'Wingdings',
-  'Wingdings 2',
-  'Wingdings 3',
-  'Apple Chancery',
-  'Apple Color Emoji',
-  'Apple SD Gothic Neo',
-  'Futura',
-  'Menlo',
-  'Optima',
-  'San Francisco',
-  'SF Pro',
-  'Ubuntu',
-  'Roboto',
-  'Noto Sans',
-  'Droid Sans',
-  'Open Sans',
+  "Arial",
+  "Arial Black",
+  "Arial Narrow",
+  "Calibri",
+  "Cambria",
+  "Cambria Math",
+  "Comic Sans MS",
+  "Consolas",
+  "Courier",
+  "Courier New",
+  "Georgia",
+  "Helvetica",
+  "Helvetica Neue",
+  "Impact",
+  "Lucida Console",
+  "Lucida Sans Unicode",
+  "Microsoft Sans Serif",
+  "Monaco",
+  "Palatino Linotype",
+  "Segoe UI",
+  "Tahoma",
+  "Times",
+  "Times New Roman",
+  "Trebuchet MS",
+  "Verdana",
+  "Andale Mono",
+  "Book Antiqua",
+  "Bookman Old Style",
+  "Century Gothic",
+  "Century Schoolbook",
+  "Franklin Gothic Medium",
+  "Garamond",
+  "Gill Sans",
+  "Lucida Bright",
+  "Lucida Grande",
+  "MS Gothic",
+  "MS PGothic",
+  "MS Sans Serif",
+  "MS Serif",
+  "Palatino",
+  "Symbol",
+  "Wingdings",
+  "Wingdings 2",
+  "Wingdings 3",
+  "Apple Chancery",
+  "Apple Color Emoji",
+  "Apple SD Gothic Neo",
+  "Futura",
+  "Menlo",
+  "Optima",
+  "San Francisco",
+  "SF Pro",
+  "Ubuntu",
+  "Roboto",
+  "Noto Sans",
+  "Droid Sans",
+  "Open Sans",
 ];
 
 function collectFonts(): FontSignals {
-  const baseFonts = ['monospace', 'sans-serif', 'serif'] as const;
-  const testString = 'mmmmmmmmmmlli';
-  const testSize = '72px';
+  const baseFonts = ["monospace", "sans-serif", "serif"] as const;
+  const testString = "mmmmmmmmmmlli";
+  const testSize = "72px";
 
-  const span = document.createElement('span');
-  span.style.position = 'absolute';
-  span.style.left = '-9999px';
-  span.style.top = '-9999px';
+  const span = document.createElement("span");
+  span.style.position = "absolute";
+  span.style.left = "-9999px";
+  span.style.top = "-9999px";
   span.style.fontSize = testSize;
-  span.style.lineHeight = 'normal';
+  span.style.lineHeight = "normal";
   span.textContent = testString;
   document.body.appendChild(span);
 
@@ -314,7 +327,10 @@ function collectFonts(): FontSignals {
     let found = false;
     for (const base of baseFonts) {
       span.style.fontFamily = `'${font}', ${base}`;
-      if (span.offsetWidth !== baseWidths[base] || span.offsetHeight !== baseHeights[base]) {
+      if (
+        span.offsetWidth !== baseWidths[base] ||
+        span.offsetHeight !== baseHeights[base]
+      ) {
         found = true;
         break;
       }
@@ -344,9 +360,9 @@ async function collectWebRTC(): Promise<WebRTCSignals> {
 
   try {
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
-    pc.createDataChannel('');
+    pc.createDataChannel("");
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -362,7 +378,8 @@ async function collectWebRTC(): Promise<WebRTCSignals> {
         result.candidateCount++;
         const candidate = event.candidate.candidate;
         if (/\d+\.\d+\.\d+\.\d+/.test(candidate)) result.hasIPv4 = true;
-        if (/[a-f0-9]{1,4}(:[a-f0-9]{1,4}){7}/.test(candidate)) result.hasIPv6 = true;
+        if (/[a-f0-9]{1,4}(:[a-f0-9]{1,4}){7}/.test(candidate))
+          result.hasIPv6 = true;
       };
     });
 
@@ -385,19 +402,19 @@ function collectStorage(): StorageSignals {
 
   return {
     localStorage: test(() => {
-      localStorage.setItem('__ps_t', '1');
-      localStorage.removeItem('__ps_t');
+      localStorage.setItem("__ps_t", "1");
+      localStorage.removeItem("__ps_t");
       return true;
     }),
     sessionStorage: test(() => {
-      sessionStorage.setItem('__ps_t', '1');
-      sessionStorage.removeItem('__ps_t');
+      sessionStorage.setItem("__ps_t", "1");
+      sessionStorage.removeItem("__ps_t");
       return true;
     }),
     indexedDB: test(() => !!window.indexedDB),
     webWorkers: test(() => !!window.Worker),
     serviceWorkers: test(() => !!navigator.serviceWorker),
-    webAssembly: test(() => typeof WebAssembly === 'object'),
+    webAssembly: test(() => typeof WebAssembly === "object"),
   };
 }
 
@@ -417,7 +434,7 @@ function collectTiming(): TimingSignals {
     // performance.now not available
   }
 
-  let timezone = 'unknown';
+  let timezone = "unknown";
   try {
     timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   } catch {
@@ -439,14 +456,17 @@ function collectAutomation(): AutomationSignals {
   const webdriver = !!n.webdriver;
   const phantom = !!w._phantom || !!w.callPhantom;
   const nightmare = !!w.__nightmare;
-  const selenium = !!d.__selenium_unwrapped || !!d.__selenium_evaluate || !!d.__fxdriver_evaluate;
+  const selenium =
+    !!d.__selenium_unwrapped ||
+    !!d.__selenium_evaluate ||
+    !!d.__fxdriver_evaluate;
   const domAutomation = !!w.domAutomation || !!w.domAutomationController;
 
   let headlessChrome = false;
   try {
     headlessChrome =
       /HeadlessChrome/.test(navigator.userAgent) ||
-      (navigator.vendor === 'Google Inc.' &&
+      (navigator.vendor === "Google Inc." &&
         !(w.chrome as Record<string, unknown>)?.runtime &&
         !!(w.chrome as Record<string, unknown>));
   } catch {
@@ -458,7 +478,7 @@ function collectAutomation(): AutomationSignals {
     puppeteer =
       !!w._puppeteer ||
       (!!n.webdriver &&
-        navigator.userAgent.includes('Chrome') &&
+        navigator.userAgent.includes("Chrome") &&
         navigator.plugins.length === 0);
   } catch {
     // check failed
@@ -485,14 +505,14 @@ function collectAutomation(): AutomationSignals {
 
   let webglInconsistency = false;
   try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl');
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl");
     if (gl) {
       const renderer = gl.getParameter(gl.RENDERER);
       const vendor = gl.getParameter(gl.VENDOR);
       if (
-        renderer === 'Google SwiftShader' ||
-        vendor === 'Google Inc.' && renderer.includes('SwiftShader')
+        renderer === "Google SwiftShader" ||
+        (vendor === "Google Inc." && renderer.includes("SwiftShader"))
       ) {
         webglInconsistency = true;
       }
@@ -555,7 +575,12 @@ export class FingerprintCollector {
       emojiCanvas: canvas.emojiHash,
       webgl: webgl.hash,
       audio: audio.hash,
-      screen: [screen.width, screen.height, screen.colorDepth, screen.pixelRatio],
+      screen: [
+        screen.width,
+        screen.height,
+        screen.colorDepth,
+        screen.pixelRatio,
+      ],
       browser: [
         browser.userAgent,
         browser.platform,
@@ -568,11 +593,15 @@ export class FingerprintCollector {
       ],
       fonts: fonts.detected,
       storage: Object.values(storage),
-      timing: [timing.timezoneOffset, timing.timezone, timing.performancePrecision],
+      timing: [
+        timing.timezoneOffset,
+        timing.timezone,
+        timing.performancePrecision,
+      ],
     });
 
     const hash = await sha256(signalData);
-    const id = 'fp_' + hash.substring(0, 16);
+    const id = "fp_" + hash.substring(0, 16);
 
     this.cachedFingerprint = {
       id,

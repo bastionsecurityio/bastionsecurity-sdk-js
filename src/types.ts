@@ -4,6 +4,8 @@ export interface BastionOptions {
   debug?: boolean;
   monitorOnInit?: boolean;
   collectInterval?: number;
+  timeout?: number;
+  retries?: number;
 }
 
 export interface CanvasSignals {
@@ -174,6 +176,7 @@ export interface NetworkSignals {
 }
 
 export interface ChallengeRequest {
+  expires_at?: string;
   id: string;
   prefix: string;
   difficulty: number;
@@ -188,7 +191,7 @@ export interface ChallengeSolution {
 
 export interface TokenPayload {
   fp: string;
-  signals: Omit<DeviceFingerprint, 'id'>;
+  signals: Omit<DeviceFingerprint, "id">;
   behavioral: BehavioralProfile;
   network: NetworkSignals;
   challenge?: ChallengeSolution;
@@ -197,18 +200,54 @@ export interface TokenPayload {
   hmac: string;
 }
 
-export interface ClassifyResult {
+export type EventType = 'signup' | 'login' | 'promo_claim' | 'checkout' | 'page_view';
+export interface ClassifyContext {
+  event_type: EventType;
+  account_id: string;
+  email?: string;
+  ip_address?: string;
+  user_agent?: string;
+  payment_hash?: string;
+  promo_code?: string;
+  order_amount?: number;
+  request_url?: string;
+  /** Supply only from the server after validating credentials. Browser claims are ignored. */
+  login_succeeded?: boolean;
+}
+export interface VerificationRequest {
+  token?: string;
+  fingerprint?: Record<string, unknown>;
+  behavior?: Record<string, unknown>;
+  environment?: Record<string, unknown>;
+  headers?: Record<string, string>;
+  context: ClassifyContext;
+  username?: string;
+  idempotency_key?: string;
+}
+export interface SignalResult { rule: string; score: number; description: string; }
+export interface Challenge { challenge_id: string; prefix: string; difficulty: number; expires_at: string; }
+export interface Decision {
   classification: 'human' | 'bot' | 'suspicious';
+  risk_score: number;
+  risk_level: 'low' | 'medium' | 'high' | 'critical';
+  action: 'allow' | 'challenge' | 'block' | 'review';
+  request_id: string;
+  device_id: string;
+  signals: SignalResult[];
+  identity?: { cluster_id: string; linked_accounts: number; shared_devices: number; shared_ips: number; shared_payments: number };
+  challenge?: Challenge;
+  decision_ms: number;
+  timestamp: string;
+}
+export interface ClassifyResult extends Decision {
   riskScore: number;
-  action: 'allow' | 'challenge' | 'block';
-  reasons?: string[];
   requestId: string;
+  reasons: string[];
 }
-
-export interface TrackEvent {
-  event: string;
-  data: Record<string, unknown>;
-  fp: string;
-  ts: number;
-  site_key: string;
+export interface BatchResult {
+  accepted: number;
+  results: Array<{ index: number; success: boolean; decision?: Decision; status?: number; message?: string }>;
 }
+export interface FingerprintResult { token: string; device_id: string; expires_at: string; spoofing_score: number; timestamp: string; }
+export interface ServerOptions { siteKey: string; secret: string; endpoint?: string; timeout?: number; retries?: number; }
+export interface TrackEvent { event: EventType; data: Record<string, unknown>; fp: string; token: string; ts: number; site_key: string; }

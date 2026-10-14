@@ -1,5 +1,4 @@
 import typescript from '@rollup/plugin-typescript';
-import terser from '@rollup/plugin-terser';
 
 export default {
   input: 'src/index.ts',
@@ -7,17 +6,17 @@ export default {
     {
       file: 'dist/bastion.js',
       format: 'umd',
-      name: 'Bastion',
+      name: 'BastionSDK',
+      exports: 'named',
       sourcemap: true,
     },
     {
-      file: 'dist/bastion.esm.js',
+      file: 'dist/bastion.esm.mjs',
       format: 'es',
       sourcemap: true,
     },
   ],
   plugins: [
     typescript({ tsconfig: './tsconfig.json' }),
-    terser(),
   ],
 };

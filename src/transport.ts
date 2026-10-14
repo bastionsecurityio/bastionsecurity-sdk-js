@@ -1,138 +1,63 @@
-import type { TrackEvent } from './types';
+import type { BastionOptions } from './types';
 
-interface QueuedEvent {
-  payload: TrackEvent;
-  retries: number;
+export const DEFAULT_ENDPOINT = 'https://api-production-761a5.up.railway.app/api/antibot';
+export function normalizeEndpoint(endpoint = DEFAULT_ENDPOINT): string {
+  const url = new URL(endpoint);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
+    throw new Error('Bastion requires HTTPS (HTTP is allowed only for local development)');
+  if (url.username || url.password || url.search || url.hash) throw new Error('Invalid API endpoint');
+  const pathname = url.pathname.replace(/\/$/, '');
+  url.pathname = !pathname ? '/api/antibot' : pathname === '/api' ? '/api/antibot' : pathname;
+  return url.toString().replace(/\/$/, '');
 }
-
+export class BastionError extends Error {
+  constructor(message: string, public status = 0, public response?: unknown) { super(message); this.name = 'BastionError'; }
+}
 export class Transport {
   private endpoint: string;
-  private siteKey: string;
-  private queue: QueuedEvent[] = [];
-  private flushTimer: ReturnType<typeof setTimeout> | null = null;
-  private maxRetries = 3;
-  private batchSize = 10;
-  private flushIntervalMs = 5000;
-
-  constructor(endpoint: string, siteKey: string) {
-    this.endpoint = endpoint;
-    this.siteKey = siteKey;
-    this.startFlushLoop();
-
-    if (typeof document !== 'undefined') {
-      document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'hidden') {
-          this.flushBeacon();
-        }
-      });
-    }
+  private controllers = new Set<AbortController>();
+  private stopped = false;
+  private pending = new Set<Promise<unknown>>();
+  constructor(endpoint: string | undefined, private siteKey: string, private options: Pick<BastionOptions, 'timeout' | 'retries'> = {}, private secret?: string) {
+    this.endpoint = normalizeEndpoint(endpoint);
+    if (!siteKey || /[\r\n]/.test(siteKey) || (secret && /[\r\n]/.test(secret))) throw new Error('Valid site credentials are required');
   }
-
-  async post<T>(path: string, body: unknown): Promise<T> {
-    const url = `${this.endpoint}${path}`;
-    const bodyStr = JSON.stringify(body);
-    const timestamp = Date.now().toString();
-    const signature = await this.sign(bodyStr + timestamp);
-
-    let lastError: Error | null = null;
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+  post<T>(path: string, body: unknown): Promise<T> {
+    const work = this.send<T>(path, body);
+    this.pending.add(work);
+    work.then(() => this.pending.delete(work), () => this.pending.delete(work));
+    return work;
+  }
+  private async send<T>(path: string, body: any): Promise<T> {
+    const serialized = JSON.stringify(body);
+    const retrySafe = Boolean(body?.idempotency_key) || (Array.isArray(body?.events) && body.events.every((e: any) => e.idempotency_key));
+    const retries = retrySafe ? Math.min(3, Math.max(0, this.options.retries ?? 2)) : 0;
+    for (let attempt = 0; ; attempt++) {
+      if (this.stopped) throw new BastionError('SDK has been destroyed');
+      const controller = new AbortController();
+      this.controllers.add(controller);
+      const timer = setTimeout(() => controller.abort(), Math.min(30000, Math.max(1000, this.options.timeout ?? 15000)));
+      let retryAfter = 0;
       try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Bastion-Site-Key': this.siteKey,
-            'X-Bastion-Timestamp': timestamp,
-            'X-Bastion-Signature': signature,
-          },
-          body: bodyStr,
+        const res = await fetch(this.endpoint + path, {
+          method: 'POST', credentials: 'omit', redirect: 'error', signal: controller.signal,
+          headers: { 'Content-Type': 'application/json', 'X-Site-Key': this.siteKey, ...(this.secret ? { 'X-Secret-Key': this.secret } : {}) }, body: serialized,
         });
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        let data: any;
+        try { data = await res.json(); } catch { throw new BastionError('API returned an invalid JSON response', res.status); }
+        if (!res.ok) {
+          retryAfter = Math.min(3000, Number(res.headers.get('retry-after') || 0) * 1000);
+          throw new BastionError(String(data.message || 'API request failed'), res.status, data);
         }
-
-        return (await response.json()) as T;
-      } catch (err) {
-        lastError = err as Error;
-        if (attempt < this.maxRetries) {
-          await this.backoff(attempt);
-        }
-      }
-    }
-
-    throw lastError;
-  }
-
-  enqueue(event: TrackEvent): void {
-    this.queue.push({ payload: event, retries: 0 });
-
-    if (this.queue.length >= this.batchSize) {
-      this.flush();
+        if (data?.success === false || !data || typeof data !== 'object') throw new BastionError('Invalid API response', res.status, data);
+        return (data.data ?? data) as T;
+      } catch (error) {
+        const failure = error instanceof BastionError ? error : new BastionError(controller.signal.aborted ? 'API request timed out or was cancelled' : 'API request could not reach the server');
+        if (this.stopped || attempt >= retries || (failure.status > 0 && failure.status !== 429 && failure.status < 500)) throw failure;
+      } finally { clearTimeout(timer); this.controllers.delete(controller); }
+      await new Promise(resolve => setTimeout(resolve, retryAfter || 250 * 2 ** attempt));
     }
   }
-
-  private startFlushLoop(): void {
-    this.flushTimer = setInterval(() => this.flush(), this.flushIntervalMs);
-  }
-
-  private async flush(): Promise<void> {
-    if (this.queue.length === 0) return;
-
-    const batch = this.queue.splice(0, this.batchSize);
-    const payloads = batch.map((e) => e.payload);
-
-    try {
-      await this.post('/v1/events/batch', { events: payloads });
-    } catch {
-      // re-queue failed events that haven't exceeded retries
-      for (const item of batch) {
-        if (item.retries < this.maxRetries) {
-          item.retries++;
-          this.queue.push(item);
-        }
-      }
-    }
-  }
-
-  private flushBeacon(): void {
-    if (this.queue.length === 0) return;
-
-    const batch = this.queue.splice(0);
-    const payloads = batch.map((e) => e.payload);
-    const body = JSON.stringify({ events: payloads });
-
-    if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
-      const blob = new Blob([body], { type: 'application/json' });
-      navigator.sendBeacon(`${this.endpoint}/v1/events/batch`, blob);
-    }
-  }
-
-  private async sign(data: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(this.siteKey),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign'],
-    );
-    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
-    return Array.from(new Uint8Array(signature))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-  }
-
-  private backoff(attempt: number): Promise<void> {
-    const delay = Math.min(1000 * 2 ** attempt + Math.random() * 1000, 10000);
-    return new Promise((resolve) => setTimeout(resolve, delay));
-  }
-
-  destroy(): void {
-    if (this.flushTimer) {
-      clearInterval(this.flushTimer);
-      this.flushTimer = null;
-    }
-    this.flushBeacon();
-  }
+  async flush(): Promise<void> { await Promise.all([...this.pending]); }
+  destroy(): void { this.stopped = true; for (const controller of this.controllers) controller.abort(); }
 }

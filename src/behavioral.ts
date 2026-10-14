@@ -4,7 +4,7 @@ import type {
   KeyboardMetrics,
   ScrollMetrics,
   TouchMetrics,
-} from './types';
+} from "./types";
 
 interface Point {
   x: number;
@@ -70,19 +70,37 @@ export class BehavioralCollector {
   private monitoring = false;
   private lastMouseTime = 0;
 
+  getSignals() {
+    const keys = this.keyEvents.slice(-256).sort((a, b) => a.downAt - b.downAt);
+    return {
+      mouse_movements: this.mousePoints.slice(-256).map(p => ({...p, type: 'move'})),
+      keystrokes: keys.map((k, i) => ({key_code: 0, hold_time: k.upAt-k.downAt, interval: i ? k.downAt-keys[i-1]!.downAt : 0, t: k.downAt})),
+      scroll_events: this.scrollEvents.slice(-256).map((s,i,a) => ({delta_y: i ? s.y-a[i-1]!.y : 0,t:s.t})),
+      touch_events: this.touchEvents.slice(-256).map(t => ({x:t.x,y:t.y,t:t.t,force:t.pressure})),
+      time_on_page_ms: this.startTime ? (this.monitoring ? performance.now() : this.stoppedAt)-this.startTime : 0,
+      form_interactions: this.formInteractions, clipboard_events: this.pasteCount,
+    };
+  }
+  private stoppedAt = 0;
+  private formInteractions = 0;
+  private onFocus = (e: FocusEvent): void => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) this.formInteractions++;
+  };
   private onMouseMove = (e: MouseEvent): void => {
     const now = performance.now();
     if (now - this.lastMouseTime < 16) return; // ~60fps throttle
     this.lastMouseTime = now;
     this.mousePoints.push({ x: e.clientX, y: e.clientY, t: now });
+    if(this.mousePoints.length>256)this.mousePoints.shift();
   };
 
   private onClick = (): void => {
     this.clickTimes.push(performance.now());
+    if (this.clickTimes.length > 256) this.clickTimes.shift();
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
-    if (!this.pendingKeys.has(e.code)) {
+    if (!this.pendingKeys.has(e.code) && this.pendingKeys.size < 64) {
       this.pendingKeys.set(e.code, performance.now());
     }
   };
@@ -92,6 +110,8 @@ export class BehavioralCollector {
     if (downAt !== undefined) {
       this.keyEvents.push({ key: e.code, downAt, upAt: performance.now() });
       this.pendingKeys.delete(e.code);
+      this.keyEvents.sort((a,b) => a.downAt-b.downAt);
+      if (this.keyEvents.length > 256) this.keyEvents.shift();
     }
   };
 
@@ -101,6 +121,7 @@ export class BehavioralCollector {
 
   private onScroll = (): void => {
     this.scrollEvents.push({ y: window.scrollY, t: performance.now() });
+    if (this.scrollEvents.length > 256) this.scrollEvents.shift();
   };
 
   private onTouchStart = (e: globalThis.TouchEvent): void => {
@@ -113,6 +134,7 @@ export class BehavioralCollector {
         pressure: touch.force || 0,
         ended: 0,
       });
+      if (this.touchEvents.length > 256) this.touchEvents.shift();
     }
   };
 
@@ -128,30 +150,36 @@ export class BehavioralCollector {
   start(): void {
     if (this.monitoring) return;
     this.monitoring = true;
-    this.startTime = performance.now();
+    if (!this.startTime) this.startTime = performance.now();
+    document.addEventListener("focusin", this.onFocus);
 
-    document.addEventListener('mousemove', this.onMouseMove, { passive: true });
-    document.addEventListener('click', this.onClick, { passive: true });
-    document.addEventListener('keydown', this.onKeyDown, { passive: true });
-    document.addEventListener('keyup', this.onKeyUp, { passive: true });
-    document.addEventListener('paste', this.onPaste, { passive: true });
-    window.addEventListener('scroll', this.onScroll, { passive: true });
-    document.addEventListener('touchstart', this.onTouchStart, { passive: true });
-    document.addEventListener('touchend', this.onTouchEnd, { passive: true });
+    document.addEventListener("mousemove", this.onMouseMove, { passive: true });
+    document.addEventListener("click", this.onClick, { passive: true });
+    document.addEventListener("keydown", this.onKeyDown, { passive: true });
+    document.addEventListener("keyup", this.onKeyUp, { passive: true });
+    document.addEventListener("paste", this.onPaste, { passive: true });
+    window.addEventListener("scroll", this.onScroll, { passive: true });
+    document.addEventListener("touchstart", this.onTouchStart, {
+      passive: true,
+    });
+    document.addEventListener("touchend", this.onTouchEnd, { passive: true });
   }
 
   stop(): void {
     if (!this.monitoring) return;
     this.monitoring = false;
+    this.stoppedAt = performance.now();
+    this.pendingKeys.clear();
+    document.removeEventListener("focusin", this.onFocus);
 
-    document.removeEventListener('mousemove', this.onMouseMove);
-    document.removeEventListener('click', this.onClick);
-    document.removeEventListener('keydown', this.onKeyDown);
-    document.removeEventListener('keyup', this.onKeyUp);
-    document.removeEventListener('paste', this.onPaste);
-    window.removeEventListener('scroll', this.onScroll);
-    document.removeEventListener('touchstart', this.onTouchStart);
-    document.removeEventListener('touchend', this.onTouchEnd);
+    document.removeEventListener("mousemove", this.onMouseMove);
+    document.removeEventListener("click", this.onClick);
+    document.removeEventListener("keydown", this.onKeyDown);
+    document.removeEventListener("keyup", this.onKeyUp);
+    document.removeEventListener("paste", this.onPaste);
+    window.removeEventListener("scroll", this.onScroll);
+    document.removeEventListener("touchstart", this.onTouchStart);
+    document.removeEventListener("touchend", this.onTouchEnd);
   }
 
   private computeMouseMetrics(): MouseMetrics {
@@ -207,9 +235,13 @@ export class BehavioralCollector {
 
     return {
       totalDistance,
-      avgSpeed: speeds.length > 0 ? speeds.reduce((a, b) => a + b, 0) / speeds.length : 0,
+      avgSpeed:
+        speeds.length > 0
+          ? speeds.reduce((a, b) => a + b, 0) / speeds.length
+          : 0,
       maxSpeed: speeds.length > 0 ? Math.max(...speeds) : 0,
-      straightLineRatio: totalSegments > 0 ? straightSegments / totalSegments : 0,
+      straightLineRatio:
+        totalSegments > 0 ? straightSegments / totalSegments : 0,
       entropy: shannonEntropy(angles, 20),
       teleportCount,
       clickCount: this.clickTimes.length,
@@ -249,13 +281,20 @@ export class BehavioralCollector {
       avgHoldDuration: holds.reduce((a, b) => a + b, 0) / holds.length,
       holdVariance: stddev(holds),
       pasteCount: this.pasteCount,
-      typingSpeed: totalTime > 0 ? (this.keyEvents.length / totalTime) * 60000 : 0,
+      typingSpeed:
+        totalTime > 0 ? (this.keyEvents.length / totalTime) * 60000 : 0,
     };
   }
 
   private computeScrollMetrics(): ScrollMetrics {
     if (this.scrollEvents.length < 2) {
-      return { totalScrollDistance: 0, avgVelocity: 0, jitter: 0, directionChanges: 0, jumpCount: 0 };
+      return {
+        totalScrollDistance: 0,
+        avgVelocity: 0,
+        jitter: 0,
+        directionChanges: 0,
+        jumpCount: 0,
+      };
     }
 
     let totalDistance = 0;
@@ -275,7 +314,11 @@ export class BehavioralCollector {
       if (absDy > 500 && dt < 50) jumpCount++;
 
       const direction = dy > 0 ? 1 : dy < 0 ? -1 : 0;
-      if (direction !== 0 && direction !== lastDirection && lastDirection !== 0) {
+      if (
+        direction !== 0 &&
+        direction !== lastDirection &&
+        lastDirection !== 0
+      ) {
         directionChanges++;
       }
       if (direction !== 0) lastDirection = direction;
@@ -284,7 +327,9 @@ export class BehavioralCollector {
     return {
       totalScrollDistance: totalDistance,
       avgVelocity:
-        velocities.length > 0 ? velocities.reduce((a, b) => a + b, 0) / velocities.length : 0,
+        velocities.length > 0
+          ? velocities.reduce((a, b) => a + b, 0) / velocities.length
+          : 0,
       jitter: stddev(velocities),
       directionChanges,
       jumpCount,
@@ -296,7 +341,9 @@ export class BehavioralCollector {
       return { avgPressure: 0, multiTouchCount: 0, avgTouchDuration: 0 };
     }
 
-    const pressures = this.touchEvents.map((t) => t.pressure).filter((p) => p > 0);
+    const pressures = this.touchEvents
+      .map((t) => t.pressure)
+      .filter((p) => p > 0);
     const durations = this.touchEvents
       .filter((t) => t.ended > 0)
       .map((t) => t.ended - t.t);
@@ -309,10 +356,14 @@ export class BehavioralCollector {
 
     return {
       avgPressure:
-        pressures.length > 0 ? pressures.reduce((a, b) => a + b, 0) / pressures.length : 0,
+        pressures.length > 0
+          ? pressures.reduce((a, b) => a + b, 0) / pressures.length
+          : 0,
       multiTouchCount,
       avgTouchDuration:
-        durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0,
+        durations.length > 0
+          ? durations.reduce((a, b) => a + b, 0) / durations.length
+          : 0,
     };
   }
 
@@ -322,7 +373,8 @@ export class BehavioralCollector {
     const scroll = this.computeScrollMetrics();
     const touch = this.computeTouchMetrics();
 
-    const sessionDurationMs = this.startTime > 0 ? performance.now() - this.startTime : 0;
+    const sessionDurationMs =
+      this.startTime > 0 ? (this.monitoring ? performance.now() : this.stoppedAt) - this.startTime : 0;
     const interactionCount =
       this.mousePoints.length +
       this.keyEvents.length +
@@ -355,10 +407,15 @@ export class BehavioralCollector {
 
     if (scroll.totalScrollDistance > 0) {
       signalCount++;
-      if (scroll.jitter < 0.01 && scroll.totalScrollDistance > 1000) botScore += 1;
+      if (scroll.jitter < 0.01 && scroll.totalScrollDistance > 1000)
+        botScore += 1;
     }
 
-    if (sessionDurationMs > 0 && sessionDurationMs < 500 && interactionCount > 10) {
+    if (
+      sessionDurationMs > 0 &&
+      sessionDurationMs < 500 &&
+      interactionCount > 10
+    ) {
       botScore += 1;
     }
 
@@ -368,15 +425,17 @@ export class BehavioralCollector {
 
     return {
       mouseEntropy: mouse.entropy,
-      mouseVelocityStd: stddev(this.mousePoints.length > 1
-        ? this.mousePoints.slice(1).map((p, i) => {
-            const prev = this.mousePoints[i];
-            const dx = p.x - prev.x;
-            const dy = p.y - prev.y;
-            const dt = p.t - prev.t;
-            return dt > 0 ? Math.sqrt(dx * dx + dy * dy) / dt : 0;
-          })
-        : []),
+      mouseVelocityStd: stddev(
+        this.mousePoints.length > 1
+          ? this.mousePoints.slice(1).map((p, i) => {
+              const prev = this.mousePoints[i];
+              const dx = p.x - prev.x;
+              const dy = p.y - prev.y;
+              const dt = p.t - prev.t;
+              return dt > 0 ? Math.sqrt(dx * dx + dy * dy) / dt : 0;
+            })
+          : [],
+      ),
       straightLineRatio: mouse.straightLineRatio,
       keystrokeVariance: keyboard.interKeyVariance,
       avgKeyHoldMs: keyboard.avgHoldDuration,
@@ -398,6 +457,8 @@ export class BehavioralCollector {
     this.keyEvents = [];
     this.pendingKeys.clear();
     this.pasteCount = 0;
+    this.formInteractions = 0;
+    this.startTime = this.monitoring ? performance.now() : 0;
     this.scrollEvents = [];
     this.touchEvents = [];
   }

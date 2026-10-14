@@ -1,153 +1,94 @@
-import type {
-  BastionOptions,
-  ClassifyResult,
-  TokenPayload,
-  TrackEvent,
-  ChallengeRequest,
-} from './types';
+import type { BastionOptions, ClassifyResult, ClassifyContext, Decision, VerificationRequest, Challenge, FingerprintResult } from './types';
 import { FingerprintCollector } from './fingerprint';
 import { BehavioralCollector } from './behavioral';
-import { NetworkCollector } from './network';
 import { ChallengeSolver } from './challenge';
-import { Transport } from './transport';
-
-const DEFAULT_ENDPOINT = 'https://api.bastionsecurity.io';
+import { Transport, BastionError } from './transport';
 
 export default class Bastion {
-  private siteKey: string;
-  private endpoint: string;
-  private debug: boolean;
-  private fingerprint: FingerprintCollector;
-  private behavioral: BehavioralCollector;
-  private network: NetworkCollector;
-  private challenge: ChallengeSolver;
+  private fingerprint = new FingerprintCollector();
+  private behavioral = new BehavioralCollector();
+  private challenge = new ChallengeSolver();
   private transport: Transport;
-  private initialized = false;
-
+  private lastToken = '';
+  private deviceId = '';
+  private expiresAt = 0;
+  private collecting?: Promise<string>;
+  private destroyed = false;
   constructor(options: BastionOptions) {
-    this.siteKey = options.siteKey;
-    this.endpoint = options.endpoint || DEFAULT_ENDPOINT;
-    this.debug = options.debug || false;
-
-    this.fingerprint = new FingerprintCollector();
-    this.behavioral = new BehavioralCollector();
-    this.network = new NetworkCollector(this.endpoint);
-    this.challenge = new ChallengeSolver();
-    this.transport = new Transport(this.endpoint, this.siteKey);
-
-    if (options.monitorOnInit !== false) {
-      this.startMonitoring();
-    }
-
-    this.initialized = true;
-    this.log('Bastion SDK initialized');
+    this.transport = new Transport(options.endpoint, options.siteKey, options);
+    if (options.monitorOnInit !== false) this.startMonitoring();
   }
-
   async getToken(): Promise<string> {
-    const [fp, networkSignals] = await Promise.all([
-      this.fingerprint.collect(),
-      this.network.collect(),
-    ]);
-
-    const behavioralProfile = this.behavioral.getProfile();
-
-    let challengeSolution;
-    try {
-      const challengeReq = await this.transport.post<ChallengeRequest>(
-        '/v1/challenge',
-        { site_key: this.siteKey, fp: fp.id },
-      );
-      challengeSolution = await this.challenge.solve(challengeReq);
-    } catch {
-      this.log('Challenge skipped (server unavailable or timeout)');
-    }
-
-    const { id: _id, ...signals } = fp;
-
-    const payload: TokenPayload = {
-      fp: fp.id,
-      signals,
-      behavioral: behavioralProfile,
-      network: networkSignals,
-      challenge: challengeSolution,
-      ts: Date.now(),
-      site_key: this.siteKey,
-      hmac: '',
-    };
-
-    const payloadStr = JSON.stringify(payload);
-    payload.hmac = await this.computeHmac(payloadStr);
-
-    const token = btoa(JSON.stringify(payload));
-    this.log('Token generated', { fp: fp.id });
-    return token;
+    if (this.destroyed) throw new BastionError('SDK has been destroyed');
+    if (this.lastToken && Date.now() < this.expiresAt - 30000) return this.lastToken;
+    if (this.collecting) return this.collecting;
+    this.collecting = (async () => {
+      const fingerprint = await this.collectFingerprint();
+      const result = await this.transport.post<FingerprintResult>('/fingerprint', {fingerprint, behavior: this.behavioral.getSignals()});
+      if (!result.token || !result.device_id) throw new BastionError('Invalid fingerprint response');
+      this.lastToken = result.token; this.deviceId = result.device_id;
+      this.expiresAt = result.expires_at ? Date.parse(result.expires_at) : Date.now() + 10 * 60000;
+      return result.token;
+    })();
+    try { return await this.collecting; } finally { this.collecting = undefined; }
   }
-
-  async classify(token: string): Promise<ClassifyResult> {
-    return this.transport.post<ClassifyResult>('/v1/classify', { token });
+  /** Send this entire request to your server to preserve the anti-bot telemetry. */
+  async buildRequest(context: ClassifyContext): Promise<VerificationRequest> {
+    const token = await this.getToken();
+    return {token, fingerprint: await this.collectFingerprint(), context, behavior: this.behavioral.getSignals(),
+      environment: await this.collectEnvironment(), idempotency_key: crypto.randomUUID()};
   }
-
-  track(event: string, data: Record<string, unknown>): void {
-    this.fingerprint.collect().then((fp) => {
-      const trackEvent: TrackEvent = {
-        event,
-        data,
-        fp: fp.id,
-        ts: Date.now(),
-        site_key: this.siteKey,
-      };
-      this.transport.enqueue(trackEvent);
-      this.log('Event tracked', { event });
+  async classify(token: string, context: ClassifyContext = {event_type: 'page_view', account_id: this.deviceId || 'anonymous'}): Promise<ClassifyResult> {
+    if (token === this.lastToken && Date.now() >= this.expiresAt - 30000) token = await this.getToken();
+    const request: VerificationRequest = {token, context, fingerprint: await this.collectFingerprint(), behavior: this.behavioral.getSignals(),
+      environment: await this.collectEnvironment(), idempotency_key: crypto.randomUUID()};
+    const decision = await this.transport.post<Decision>('/collect', request);
+    return {...decision, riskScore: decision.risk_score, requestId: decision.request_id, reasons: (decision.signals || []).map(s => s.description)};
+  }
+  async track(event: ClassifyContext['event_type'], data: Record<string, unknown> = {}): Promise<ClassifyResult> {
+    return this.classify(await this.getToken(), {
+      event_type: event, account_id: String(data.accountId || data.account_id || this.deviceId),
+      email: data.email as string | undefined, payment_hash: (data.paymentHash ?? data.payment_hash) as string | undefined,
+      promo_code: (data.promoCode ?? data.promo_code) as string | undefined,
+      order_amount: (data.amount ?? data.order_amount) as number | undefined,
+      request_url: String(data.request_url || window.location.href),
     });
   }
-
-  startMonitoring(): void {
-    this.behavioral.start();
-    this.log('Behavioral monitoring started');
+  async createChallenge(): Promise<Challenge> { return this.transport.post<Challenge>('/challenge', {}); }
+  async solveChallenge(challenge: Challenge): Promise<boolean> {
+    const solution = await this.challenge.solve({id: challenge.challenge_id, prefix: challenge.prefix, difficulty: challenge.difficulty, expires_at: challenge.expires_at});
+    const result = await this.transport.post<{valid: boolean}>('/challenge/verify', {challenge_id: solution.id, nonce: solution.nonce.toString(36)});
+    return result.valid === true;
   }
-
-  stopMonitoring(): void {
-    this.behavioral.stop();
-    this.log('Behavioral monitoring stopped');
+  async flush(): Promise<void> { await this.transport.flush(); }
+  startMonitoring(): void { if (this.destroyed) throw new BastionError('SDK has been destroyed'); this.behavioral.start(); }
+  stopMonitoring(): void { this.behavioral.stop(); }
+  destroy(): void { this.destroyed = true; this.behavioral.stop(); this.challenge.destroy(); this.transport.destroy(); }
+  private async collectFingerprint(): Promise<Record<string, unknown>> {
+    const f = await this.fingerprint.collect();
+    return {canvas_hash: f.canvas.hash, webgl_renderer: f.webgl.renderer, webgl_vendor: f.webgl.vendor, audio_fingerprint: f.audio.hash,
+      fonts: f.fonts.detected, screen_resolution: `${f.screen.width}x${f.screen.height}`, color_depth: f.screen.colorDepth,
+      timezone: f.timing.timezone, timezone_offset: f.timing.timezoneOffset, language: f.browser.language, languages: f.browser.languages,
+      platform: f.browser.platform, user_agent: f.browser.userAgent, hardware_concurrency: f.browser.hardwareConcurrency,
+      device_memory: f.browser.deviceMemory, touch_support: f.browser.maxTouchPoints > 0, max_touch_points: f.browser.maxTouchPoints,
+      cookies_enabled: f.browser.cookieEnabled, webdriver: f.automation.webdriver,
+      automation_flags: Object.entries(f.automation).filter(([,v]) => v === true).map(([k]) => k)};
   }
-
-  destroy(): void {
-    this.behavioral.stop();
-    this.challenge.destroy();
-    this.transport.destroy();
-    this.initialized = false;
-    this.log('Bastion SDK destroyed');
-  }
-
-  private async computeHmac(data: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const key = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(this.siteKey),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign'],
-    );
-    const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
-    return Array.from(new Uint8Array(signature))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('');
-  }
-
-  private log(message: string, data?: Record<string, unknown>): void {
-    if (!this.debug) return;
-    if (data) {
-      console.log(`[Bastion] ${message}`, data);
-    } else {
-      console.log(`[Bastion] ${message}`);
-    }
+  private async collectEnvironment(): Promise<Record<string, unknown>> {
+    const f = await this.fingerprint.collect();
+    const nav = navigator as any; const win = window as any;
+    return {nonce: crypto.randomUUID(), request_timestamp: Date.now(), chrome_runtime: Boolean(win.chrome?.runtime), has_chrome_obj: Boolean(win.chrome),
+      notification_permission: typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
+      plugin_mime_types: nav.mimeTypes?.length || 0, viewport_width: window.innerWidth, viewport_height: window.innerHeight,
+      outer_width: window.outerWidth, outer_height: window.outerHeight, browser_timezone: f.timing.timezone,
+      connection_type: nav.connection?.effectiveType || 'unknown', connection_rtt_ms: nav.connection?.rtt || 0,
+      webgl_extensions: f.webgl.extensions, has_permissions_api: Boolean(nav.permissions), has_battery_api: Boolean(nav.getBattery),
+      has_gamepad_api: Boolean(nav.getGamepads), has_bluetooth_api: Boolean(nav.bluetooth), has_usb_api: Boolean(nav.usb),
+      has_serial_api: Boolean(nav.serial), service_worker_ready: Boolean(nav.serviceWorker?.controller)};
   }
 }
+export { ServerBastion, verifyWebhook } from './server';
+export { BastionError } from './transport';
+export type * from './types';
 
-export type {
-  BastionOptions,
-  ClassifyResult,
-  DeviceFingerprint,
-  BehavioralProfile,
-  TokenPayload,
-} from './types';
+export { Bastion };
