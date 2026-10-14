@@ -1,6 +1,6 @@
 import type { BastionOptions } from './types';
 
-export const DEFAULT_ENDPOINT = 'https://api-production-761a5.up.railway.app/api/antibot';
+export const DEFAULT_ENDPOINT = 'https://api.bastionsecurity.io/api/antibot';
 export function normalizeEndpoint(endpoint = DEFAULT_ENDPOINT): string {
   const url = new URL(endpoint);
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
