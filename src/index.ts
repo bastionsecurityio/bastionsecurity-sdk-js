@@ -43,7 +43,7 @@ export default class Bastion {
     const enabled = applies(policy, context.event_type);
     const request: VerificationRequest = {
       ...(enabled ? {} : {token: suppliedToken || await this.getToken()}),
-      fingerprint: await this.collectFingerprint(), context, behavior: this.behavioral.getSignals(),
+      fingerprint: await this.collectFingerprint(), context, behavior: this.behavioral.getSignals(enabled && policy.interactions),
       environment: await this.collectEnvironment(), idempotency_key: crypto.randomUUID(),
     };
     if (!enabled) return request;

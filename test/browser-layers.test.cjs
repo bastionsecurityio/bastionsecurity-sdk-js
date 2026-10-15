@@ -8,5 +8,9 @@ test('receipt-only tracking negotiates proof without a preceding plaintext finge
 });
 test('off policy never starts the additional exchange and preserves legacy telemetry',async()=>{
  const c=client(),paths=[];c.transport.post=async(path)=>{paths.push(path);if(path==='/browser/config')return {mode:'off',telemetry:false,interactions:false,encryptedExchange:false,events:['signup']};if(path==='/fingerprint')return {token:'fingerprint-token',device_id:'unit-device',expires_at:new Date(Date.now()+600000).toISOString()};throw Error('Unexpected endpoint '+path)};
- try{const request=await c.buildRequest({event_type:'signup',account_id:'unit-account'});assert.equal(request.token,'fingerprint-token');assert.ok(request.fingerprint);assert.equal(request.browser_receipt,undefined);assert.deepEqual(paths,['/browser/config','/fingerprint']);}finally{c.destroy()}
+ try{const request=await c.buildRequest({event_type:'signup',account_id:'unit-account'});assert.equal(request.token,'fingerprint-token');assert.ok(request.fingerprint);assert.equal(request.browser_receipt,undefined);assert.equal(request.behavior.ui_interactions,undefined);assert.deepEqual(paths,['/browser/config','/fingerprint']);}finally{c.destroy()}
+});
+test('generic UI counts are included only for an explicitly enabled interaction layer',async()=>{
+ const c=client();let submitted;c.recordInteraction();c.transport.post=async(path,body)=>{if(path==='/browser/config')return {mode:'monitor',telemetry:false,interactions:true,encryptedExchange:false,events:['signup']};if(path==='/browser/start')return {id:'session',encrypted:false};if(path==='/browser/exchange'){submitted=body.payload;return {browser_receipt:'opaque-receipt'}}throw Error('Unexpected endpoint '+path)};
+ try{await c.buildRequest({event_type:'signup',account_id:'unit-account'});assert.equal(submitted.behavior.ui_interactions,1);assert.equal(submitted.behavior.input_values,undefined);}finally{c.destroy()}
 });
