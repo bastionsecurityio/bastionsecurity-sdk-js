@@ -70,6 +70,8 @@ export class BehavioralCollector {
   private monitoring = false;
   private lastMouseTime = 0;
 
+  private uiInteractions = 0;
+  recordInteraction(): void { this.uiInteractions++; }
   getSignals() {
     const keys = this.keyEvents.slice(-256).sort((a, b) => a.downAt - b.downAt);
     return {
@@ -78,6 +80,7 @@ export class BehavioralCollector {
       scroll_events: this.scrollEvents.slice(-256).map((s,i,a) => ({delta_y: i ? s.y-a[i-1]!.y : 0,t:s.t})),
       touch_events: this.touchEvents.slice(-256).map(t => ({x:t.x,y:t.y,t:t.t,force:t.pressure})),
       time_on_page_ms: this.startTime ? (this.monitoring ? performance.now() : this.stoppedAt)-this.startTime : 0,
+      ui_interactions: this.uiInteractions + this.clickTimes.length,
       form_interactions: this.formInteractions, clipboard_events: this.pasteCount,
     };
   }

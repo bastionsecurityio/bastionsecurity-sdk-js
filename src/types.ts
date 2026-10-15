@@ -214,7 +214,9 @@ export interface ClassifyContext {
   /** Supply only from the server after validating credentials. Browser claims are ignored. */
   login_succeeded?: boolean;
 }
+export interface BrowserProtection { mode: "off"|"monitor"|"enforce"; telemetry: boolean; interactions: boolean; encryptedExchange: boolean; events: string[]; }
 export interface VerificationRequest {
+  browser_receipt?: string;
   token?: string;
   fingerprint?: Record<string, unknown>;
   behavior?: Record<string, unknown>;
@@ -234,6 +236,7 @@ export interface Decision {
   request_id: string;
   device_id: string;
   signals: SignalResult[];
+  browser_evidence?: { active: boolean; mode: string; status: string; encrypted: boolean; interacted: boolean; needsVerification: boolean };
   identity?: { cluster_id: string; linked_accounts: number; shared_devices: number; shared_ips: number; shared_payments: number };
   challenge?: Challenge;
   decision_ms: number;

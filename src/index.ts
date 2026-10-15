@@ -2,6 +2,7 @@ import type { BastionOptions, ClassifyResult, ClassifyContext, Decision, Verific
 import { FingerprintCollector } from './fingerprint';
 import { BehavioralCollector } from './behavioral';
 import { ChallengeSolver } from './challenge';
+import { browserPolicy, applies, browserReceipt } from './browser-evidence';
 import { Transport, BastionError } from './transport';
 
 export default class Bastion {
@@ -34,19 +35,38 @@ export default class Bastion {
   }
   /** Send this entire request to your server to preserve the anti-bot telemetry. */
   async buildRequest(context: ClassifyContext): Promise<VerificationRequest> {
-    const token = await this.getToken();
-    return {token, fingerprint: await this.collectFingerprint(), context, behavior: this.behavioral.getSignals(),
-      environment: await this.collectEnvironment(), idempotency_key: crypto.randomUUID()};
+    return this.prepareRequest(context);
+  }
+  private async prepareRequest(context: ClassifyContext, suppliedToken?: string): Promise<VerificationRequest> {
+    if (this.destroyed) throw new BastionError('SDK has been destroyed');
+    const policy = await browserPolicy(this.transport);
+    const enabled = applies(policy, context.event_type);
+    const request: VerificationRequest = {
+      ...(enabled ? {} : {token: suppliedToken || await this.getToken()}),
+      fingerprint: await this.collectFingerprint(), context, behavior: this.behavioral.getSignals(),
+      environment: await this.collectEnvironment(), idempotency_key: crypto.randomUUID(),
+    };
+    if (!enabled) return request;
+    try {
+      const receipt = await browserReceipt(this.transport, request);
+      // Authenticated telemetry stays in the exchange; the application forwards an opaque receipt.
+      return {context, idempotency_key: request.idempotency_key, browser_receipt: receipt};
+    } catch(error) {
+      if (policy.mode === 'enforce') throw error;
+      if (policy.encryptedExchange) return {context,idempotency_key:request.idempotency_key};
+      return request; // Monitoring cannot interrupt a legitimate action if collection fails.
+    }
   }
   async classify(token: string, context: ClassifyContext = {event_type: 'page_view', account_id: this.deviceId || 'anonymous'}): Promise<ClassifyResult> {
-    if (token === this.lastToken && Date.now() >= this.expiresAt - 30000) token = await this.getToken();
-    const request: VerificationRequest = {token, context, fingerprint: await this.collectFingerprint(), behavior: this.behavioral.getSignals(),
-      environment: await this.collectEnvironment(), idempotency_key: crypto.randomUUID()};
+    if (token && token === this.lastToken && Date.now() >= this.expiresAt - 30000) token = await this.getToken();
+    const request = await this.prepareRequest(context, token);
     const decision = await this.transport.post<Decision>('/collect', request);
     return {...decision, riskScore: decision.risk_score, requestId: decision.request_id, reasons: (decision.signals || []).map(s => s.description)};
   }
+  /** Record a generic custom-control interaction without text, cookie choices or input contents. */
+  recordInteraction(): void { this.behavioral.recordInteraction(); }
   async track(event: ClassifyContext['event_type'], data: Record<string, unknown> = {}): Promise<ClassifyResult> {
-    return this.classify(await this.getToken(), {
+    return this.classify((data.accountId || data.account_id) ? '' : await this.getToken(), {
       event_type: event, account_id: String(data.accountId || data.account_id || this.deviceId),
       email: data.email as string | undefined, payment_hash: (data.paymentHash ?? data.payment_hash) as string | undefined,
       promo_code: (data.promoCode ?? data.promo_code) as string | undefined,

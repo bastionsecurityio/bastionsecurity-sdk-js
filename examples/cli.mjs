@@ -18,9 +18,9 @@ try {
     client = new ServerBastion({siteKey: required('BASTION_SITE_KEY'), secret: required('BASTION_SECRET_KEY'), endpoint: process.env.BASTION_ENDPOINT});
     if (mode === 'verify') {
       const telemetry = await json(input), order = await json(extra);
-      if (!telemetry.token || !telemetry.fingerprint || !telemetry.idempotency_key) throw new Error('Complete buildRequest() telemetry with a stable idempotency_key is required');
+      if ((!telemetry.browser_receipt && (!telemetry.token || !telemetry.fingerprint)) || !telemetry.idempotency_key) throw new Error('Complete buildRequest() telemetry with a stable idempotency_key is required');
       if (typeof order.customerId !== 'string' || !order.customerId || typeof order.paymentId !== 'string' || !order.paymentId || !Number.isFinite(order.amount) || order.amount < 0) throw new Error('Trusted order needs customerId, paymentId, and a finite nonnegative amount');
-      const decision = await client.verify({token: telemetry.token, fingerprint: telemetry.fingerprint, behavior: telemetry.behavior, environment: telemetry.environment, idempotency_key: telemetry.idempotency_key, context: {event_type: 'checkout', account_id: order.customerId, order_amount: order.amount, payment_hash: order.paymentId}});
+      const decision = await client.verify({browser_receipt: telemetry.browser_receipt, token: telemetry.token, fingerprint: telemetry.fingerprint, behavior: telemetry.behavior, environment: telemetry.environment, idempotency_key: telemetry.idempotency_key, context: {event_type: 'checkout', account_id: order.customerId, order_amount: order.amount, payment_hash: order.paymentId}});
       output = {allowed: decision.action === 'allow', decision};
     } else if (mode === 'batch') {
       const requests = await json(input);

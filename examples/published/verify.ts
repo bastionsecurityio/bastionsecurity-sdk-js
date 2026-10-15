@@ -14,6 +14,7 @@ export async function verifyCheckout(
   order: { customerId: string; amount: number; paymentId: string },
 ) {
   const decision = await bastion.verify({
+    browser_receipt: telemetry.browser_receipt,
     token: telemetry.token,
     fingerprint: telemetry.fingerprint,
     behavior: telemetry.behavior,
